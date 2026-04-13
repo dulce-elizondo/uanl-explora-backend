@@ -19,10 +19,11 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 
 const db = mysql.createConnection({
-  host: "localhost",
+  host: "metro.proxy.rlwy.net",
   user: "root",
-  password: "",
-  database: "uanl_explora"
+  password: "FmTpWTxXGlzPuWjHThqhzUvcwHQIkUNjx",
+  database: "railway",
+  port: 40965
 });
 
 db.connect(err => {
@@ -190,7 +191,9 @@ app.get("/mis-resenas/:usuario_id", (req, res) => {
 });
 
 // 🔹 SIEMPRE AL FINAL
-app.listen(3000, () => {
-  console.log("Servidor en http://localhost:3000");
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+  console.log("Servidor corriendo en puerto", PORT);
 });
 
