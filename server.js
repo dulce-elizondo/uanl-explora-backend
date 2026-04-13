@@ -62,11 +62,11 @@ app.post("/lugares", upload.single("foto"), async (req, res) => {
 
 // RESEÑAS
 app.post("/resenas", async (req, res) => {
-  const { usuario_id, lugar_id, comentario, calificacion } = req.body;
+  const { usuario_id, lugar_id, lugar_id_str, comentario, calificacion } = req.body;
   try {
     await db.query(
-      "INSERT INTO resenas (usuario_id, lugar_id, comentario, calificacion) VALUES (?, ?, ?, ?)",
-      [usuario_id, lugar_id, comentario, calificacion]
+      "INSERT INTO resenas (usuario_id, lugar_id, lugar_id_str, comentario, calificacion) VALUES (?, ?, ?, ?, ?)",
+      [usuario_id, lugar_id, lugar_id_str || null, comentario, calificacion]
     );
     res.json({ mensaje: "Reseña guardada" });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -161,6 +161,57 @@ app.get("/mis-resenas/:usuario_id", async (req, res) => {
       [req.params.usuario_id]
     );
     res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ELIMINAR RESEÑA
+app.delete("/resenas/:id", async (req, res) => {
+  try {
+    await db.query("DELETE FROM resenas WHERE id = ?", [req.params.id]);
+    res.json({ mensaje: "Reseña eliminada" });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// RESEÑAS DEL USUARIO (para sincronizar en nuevo dispositivo)
+app.get("/resenas/usuario/:usuario_id", async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      "SELECT * FROM resenas WHERE usuario_id = ? AND lugar_id_str IS NOT NULL ORDER BY id DESC",
+      [req.params.usuario_id]
+    );
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// FAVORITOS
+app.get("/favoritos/:usuario_id", async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      "SELECT lugar_id_str FROM favoritos WHERE usuario_id = ?",
+      [req.params.usuario_id]
+    );
+    res.json(rows.map(function(r) { return r.lugar_id_str; }));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/favoritos", async (req, res) => {
+  const { usuario_id, lugar_id_str } = req.body;
+  try {
+    await db.query(
+      "INSERT IGNORE INTO favoritos (usuario_id, lugar_id_str) VALUES (?, ?)",
+      [usuario_id, lugar_id_str]
+    );
+    res.json({ mensaje: "Favorito agregado" });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete("/favoritos/:usuario_id/:lugar_id_str", async (req, res) => {
+  try {
+    await db.query(
+      "DELETE FROM favoritos WHERE usuario_id = ? AND lugar_id_str = ?",
+      [req.params.usuario_id, req.params.lugar_id_str]
+    );
+    res.json({ mensaje: "Favorito eliminado" });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
