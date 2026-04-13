@@ -1,22 +1,37 @@
-const express = require("express");
-const mysql   = require("mysql2/promise");
-const cors    = require("cors");
-const multer  = require("multer");
-const path    = require("path");
+const express    = require("express");
+const mysql      = require("mysql2/promise");
+const cors       = require("cors");
+const multer     = require("multer");
+const cloudinary = require("cloudinary").v2;
+const { Readable } = require("stream");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Servir imágenes subidas como archivos estáticos
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-
-// Configuración de multer — guarda en carpeta uploads/
-const storage = multer.diskStorage({
-  destination: function(_req, _file, cb) { cb(null, path.join(__dirname, 'uploads')); },
-  filename:    function(_req, file, cb)  { cb(null, Date.now() + path.extname(file.originalname)); }
+// Cloudinary config
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME || "dsizydbkc",
+  api_key:    process.env.CLOUDINARY_API_KEY    || "569919151826384",
+  api_secret: process.env.CLOUDINARY_API_SECRET || "gQxyt8KdpnGFrVD_etY8Q-CtRCw"
 });
-const upload = multer({ storage });
+
+// Multer en memoria (no guarda en disco)
+const upload = multer({ storage: multer.memoryStorage() });
+
+// Helper: sube buffer a Cloudinary y retorna la URL segura
+function subirACloudinary(buffer, folder) {
+  return new Promise(function(resolve, reject) {
+    var stream = cloudinary.uploader.upload_stream(
+      { folder: folder || "uanl-explora" },
+      function(err, result) {
+        if (err) reject(err);
+        else resolve(result.secure_url);
+      }
+    );
+    Readable.from(buffer).pipe(stream);
+  });
+}
 
 const db = mysql.createPool({
   host:     process.env.DB_HOST     || "metro.proxy.rlwy.net",
@@ -50,13 +65,14 @@ app.get("/lugares", async (_req, res) => {
 app.post("/lugares", upload.single("foto"), async (req, res) => {
   const { nombre, categoria, descripcion } = req.body;
   if (!nombre) return res.status(400).json({ error: "El nombre es obligatorio" });
-  const fotoNombre = req.file ? req.file.filename : null;
   try {
+    var fotoUrl = null;
+    if (req.file) fotoUrl = await subirACloudinary(req.file.buffer, "uanl-explora/lugares");
     const [result] = await db.query(
       "INSERT INTO lugares (nombre, categoria, descripcion, imagen) VALUES (?, ?, ?, ?)",
-      [nombre, categoria || null, descripcion || null, fotoNombre]
+      [nombre, categoria || null, descripcion || null, fotoUrl]
     );
-    res.json({ id: result.insertId, nombre, categoria, descripcion, foto: fotoNombre });
+    res.json({ id: result.insertId, nombre, categoria, descripcion, foto: fotoUrl });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -122,14 +138,15 @@ app.get("/negocios", async (_req, res) => {
 app.post("/negocios", upload.single("foto"), async (req, res) => {
   const { usuario_id, nombre, categoria, descripcion, dias, horario, ubicacion } = req.body;
   if (!nombre) return res.status(400).json({ error: "El nombre es obligatorio" });
-  const fotoNombre = req.file ? req.file.filename : null;
   try {
+    var fotoUrl = null;
+    if (req.file) fotoUrl = await subirACloudinary(req.file.buffer, "uanl-explora/negocios");
     const [result] = await db.query(
       "INSERT INTO negocios (usuario_id, nombre, categoria, descripcion, dias, horario, ubicacion, foto) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
       [usuario_id || null, nombre, categoria || null, descripcion || null,
-       dias || null, horario || null, ubicacion || null, fotoNombre]
+       dias || null, horario || null, ubicacion || null, fotoUrl]
     );
-    res.json({ id: result.insertId, nombre, categoria, descripcion, dias, horario, ubicacion, foto: fotoNombre });
+    res.json({ id: result.insertId, nombre, categoria, descripcion, dias, horario, ubicacion, foto: fotoUrl });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -137,8 +154,9 @@ app.put("/negocios/:id/foto", upload.single("foto"), async (req, res) => {
   const { id } = req.params;
   if (!req.file) return res.status(400).json({ error: "Se requiere una foto" });
   try {
-    await db.query("UPDATE negocios SET foto = ? WHERE id = ?", [req.file.filename, id]);
-    res.json({ foto: req.file.filename });
+    var fotoUrl = await subirACloudinary(req.file.buffer, "uanl-explora/negocios");
+    await db.query("UPDATE negocios SET foto = ? WHERE id = ?", [fotoUrl, id]);
+    res.json({ foto: fotoUrl });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
