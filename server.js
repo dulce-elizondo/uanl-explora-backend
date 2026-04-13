@@ -1,5 +1,5 @@
 const express = require("express");
-const mysql   = require("mysql2");
+const mysql   = require("mysql2/promise");
 const cors    = require("cors");
 const multer  = require("multer");
 const path    = require("path");
@@ -18,182 +18,152 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-const db = mysql.createConnection({
-  host: "metro.proxy.rlwy.net",
-  user: "root",
-  password: "FmTpWTxXGlzPuWjHThqhzUvcwHQIkUNjx",
-  database: "railway",
-  port: 40965
+const db = mysql.createPool({
+  host:     process.env.DB_HOST     || "metro.proxy.rlwy.net",
+  user:     process.env.DB_USER     || "root",
+  password: process.env.DB_PASSWORD || "FmTpWTxXGlzPuWjHThqhzUvcwHQIkUNjx",
+  database: process.env.DB_NAME     || "railway",
+  port:     parseInt(process.env.DB_PORT) || 40965,
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0
 });
 
-db.connect(err => {
-  if (err) {
-    console.log("Error:", err);
-  } else {
-    console.log("MySQL conectado");
-  }
-});
+db.getConnection()
+  .then(conn => { console.log("MySQL conectado"); conn.release(); })
+  .catch(err => console.log("Error MySQL:", err.message));
 
+// ─── RUTAS ───────────────────────────────────────────────────────────────────
 
-// 🔹 AQUÍ YA TENÍAS ESTO
-app.get("/", (req, res) => {
+app.get("/", (_req, res) => {
   res.send("Servidor funcionando 🚀");
 });
 
-
-// 🔥 👉 AQUÍ VA EL PASO 3 (debajo del /)
-app.get("/lugares", (req, res) => {
-  db.query("SELECT * FROM lugares", (err, result) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(result);
-  });
+// LUGARES
+app.get("/lugares", async (_req, res) => {
+  try {
+    const [rows] = await db.query("SELECT * FROM lugares");
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post("/lugares", upload.single("foto"), (req, res) => {
+app.post("/lugares", upload.single("foto"), async (req, res) => {
   const { nombre, categoria, descripcion } = req.body;
   if (!nombre) return res.status(400).json({ error: "El nombre es obligatorio" });
-
   const fotoNombre = req.file ? req.file.filename : null;
-
-  const sql = "INSERT INTO lugares (nombre, categoria, descripcion, imagen) VALUES (?, ?, ?, ?)";
-  db.query(sql, [nombre, categoria || null, descripcion || null, fotoNombre], (err, result) => {
-    if (err) return res.status(500).json({ error: err.message });
+  try {
+    const [result] = await db.query(
+      "INSERT INTO lugares (nombre, categoria, descripcion, imagen) VALUES (?, ?, ?, ?)",
+      [nombre, categoria || null, descripcion || null, fotoNombre]
+    );
     res.json({ id: result.insertId, nombre, categoria, descripcion, foto: fotoNombre });
-  });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
-app.post("/resenas", (req, res) => {
+
+// RESEÑAS
+app.post("/resenas", async (req, res) => {
   const { usuario_id, lugar_id, comentario, calificacion } = req.body;
-
-  const sql = `
-    INSERT INTO resenas (usuario_id, lugar_id, comentario, calificacion)
-    VALUES (?, ?, ?, ?)
-  `;
-
-  db.query(sql, [usuario_id, lugar_id, comentario, calificacion], (err, result) => {
-    if (err) {
-      return res.json(err);
-    }
+  try {
+    await db.query(
+      "INSERT INTO resenas (usuario_id, lugar_id, comentario, calificacion) VALUES (?, ?, ?, ?)",
+      [usuario_id, lugar_id, comentario, calificacion]
+    );
     res.json({ mensaje: "Reseña guardada" });
-  });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
-app.get("/resenas", (req, res) => {
-  db.query("SELECT * FROM resenas", (err, result) => {
-    if (err) {
-      return res.json(err);
-    }
-    res.json(result);
-  });
+
+app.get("/resenas", async (_req, res) => {
+  try {
+    const [rows] = await db.query("SELECT * FROM resenas");
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // REGISTRO
-app.post("/registro", (req, res) => {
+app.post("/registro", async (req, res) => {
   const { nombre, apellido, usuario, password, foto } = req.body;
-
   if (!nombre || !apellido || !usuario || !password) {
     return res.status(400).json({ error: "Faltan campos obligatorios" });
   }
-
-  // Verificar que el usuario no exista ya
-  db.query("SELECT id FROM usuarios WHERE usuario = ?", [usuario], (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
+  try {
+    const [rows] = await db.query("SELECT id FROM usuarios WHERE usuario = ?", [usuario]);
     if (rows.length > 0) return res.status(409).json({ error: "Ese nombre de usuario ya está en uso" });
 
-    const sql = `INSERT INTO usuarios (nombre, apellido, usuario, password, foto) VALUES (?, ?, ?, ?, ?)`;
-    db.query(sql, [nombre, apellido, usuario, password, foto || null], (err, result) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json({
-        id: result.insertId,
-        nombre,
-        apellido,
-        usuario,
-        foto: foto || null
-      });
-    });
-  });
+    const [result] = await db.query(
+      "INSERT INTO usuarios (nombre, apellido, usuario, password, foto) VALUES (?, ?, ?, ?, ?)",
+      [nombre, apellido, usuario, password, foto || null]
+    );
+    res.json({ id: result.insertId, nombre, apellido, usuario, foto: foto || null });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // LOGIN
-app.post("/login", (req, res) => {
+app.post("/login", async (req, res) => {
   const { usuario, password } = req.body;
-
-  if (!usuario || !password) {
-    return res.status(400).json({ error: "Faltan campos" });
-  }
-
-  db.query(
-    "SELECT id, nombre, apellido, usuario, foto FROM usuarios WHERE usuario = ? AND password = ?",
-    [usuario, password],
-    (err, rows) => {
-      if (err) return res.status(500).json({ error: err.message });
-      if (rows.length === 0) return res.status(401).json({ error: "Usuario o contraseña incorrectos" });
-      res.json(rows[0]);
-    }
-  );
+  if (!usuario || !password) return res.status(400).json({ error: "Faltan campos" });
+  try {
+    const [rows] = await db.query(
+      "SELECT id, nombre, apellido, usuario, foto FROM usuarios WHERE usuario = ? AND password = ?",
+      [usuario, password]
+    );
+    if (rows.length === 0) return res.status(401).json({ error: "Usuario o contraseña incorrectos" });
+    res.json(rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
+
 // NEGOCIOS
-app.get("/negocios", (_req, res) => {
-  db.query("SELECT * FROM negocios ORDER BY created_at DESC", (err, result) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(result);
-  });
+app.get("/negocios", async (_req, res) => {
+  try {
+    const [rows] = await db.query("SELECT * FROM negocios ORDER BY created_at DESC");
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post("/negocios", upload.single("foto"), (req, res) => {
+app.post("/negocios", upload.single("foto"), async (req, res) => {
   const { usuario_id, nombre, categoria, descripcion, dias, horario, ubicacion } = req.body;
   if (!nombre) return res.status(400).json({ error: "El nombre es obligatorio" });
-
-  // Solo guardar el nombre del archivo, no base64
   const fotoNombre = req.file ? req.file.filename : null;
-
-  const sql = `INSERT INTO negocios (usuario_id, nombre, categoria, descripcion, dias, horario, ubicacion, foto)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
-  db.query(sql, [usuario_id || null, nombre, categoria || null, descripcion || null,
-                 dias || null, horario || null, ubicacion || null, fotoNombre], (err, result) => {
-    if (err) return res.status(500).json({ error: err.message });
+  try {
+    const [result] = await db.query(
+      "INSERT INTO negocios (usuario_id, nombre, categoria, descripcion, dias, horario, ubicacion, foto) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      [usuario_id || null, nombre, categoria || null, descripcion || null,
+       dias || null, horario || null, ubicacion || null, fotoNombre]
+    );
     res.json({ id: result.insertId, nombre, categoria, descripcion, dias, horario, ubicacion, foto: fotoNombre });
-  });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ACTUALIZAR FOTO DE NEGOCIO
-app.put("/negocios/:id/foto", upload.single("foto"), (req, res) => {
+app.put("/negocios/:id/foto", upload.single("foto"), async (req, res) => {
   const { id } = req.params;
   if (!req.file) return res.status(400).json({ error: "Se requiere una foto" });
-  const fotoNombre = req.file.filename;
-  db.query("UPDATE negocios SET foto = ? WHERE id = ?", [fotoNombre, id], (err) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json({ foto: fotoNombre });
-  });
+  try {
+    await db.query("UPDATE negocios SET foto = ? WHERE id = ?", [req.file.filename, id]);
+    res.json({ foto: req.file.filename });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ELIMINAR NEGOCIO
-app.delete("/negocios/:id", (req, res) => {
-  const { id } = req.params;
-  db.query("DELETE FROM negocios WHERE id = ?", [id], (err) => {
-    if (err) return res.status(500).json({ error: err.message });
+app.delete("/negocios/:id", async (req, res) => {
+  try {
+    await db.query("DELETE FROM negocios WHERE id = ?", [req.params.id]);
     res.json({ mensaje: "Negocio eliminado" });
-  });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// MIS RESEÑAS (reseñas del usuario logueado)
-app.get("/mis-resenas/:usuario_id", (req, res) => {
-  const { usuario_id } = req.params;
-  const sql = `
-    SELECT r.*, l.nombre AS lugar_nombre, l.categoria
-    FROM resenas r
-    LEFT JOIN lugares l ON r.lugar_id = l.id
-    WHERE r.usuario_id = ?
-    ORDER BY r.id DESC
-  `;
-  db.query(sql, [usuario_id], (err, result) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json(result);
-  });
+// MIS RESEÑAS
+app.get("/mis-resenas/:usuario_id", async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      `SELECT r.*, l.nombre AS lugar_nombre, l.categoria
+       FROM resenas r
+       LEFT JOIN lugares l ON r.lugar_id = l.id
+       WHERE r.usuario_id = ?
+       ORDER BY r.id DESC`,
+      [req.params.usuario_id]
+    );
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// 🔹 SIEMPRE AL FINAL
+// ─── INICIO ───────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
-
-app.listen(PORT, () => {
-  console.log("Servidor corriendo en puerto", PORT);
-});
-
+app.listen(PORT, () => console.log("Servidor corriendo en puerto", PORT));
