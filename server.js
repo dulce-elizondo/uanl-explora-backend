@@ -96,8 +96,8 @@ app.get("/resenas", async (_req, res) => {
 });
 
 // REGISTRO
-app.post("/registro", async (req, res) => {
-  const { nombre, apellido, usuario, password, foto } = req.body;
+app.post("/registro", upload.single("foto"), async (req, res) => {
+  const { nombre, apellido, usuario, password } = req.body;
   if (!nombre || !apellido || !usuario || !password) {
     return res.status(400).json({ error: "Faltan campos obligatorios" });
   }
@@ -105,11 +105,14 @@ app.post("/registro", async (req, res) => {
     const [rows] = await db.query("SELECT id FROM usuarios WHERE usuario = ?", [usuario]);
     if (rows.length > 0) return res.status(409).json({ error: "Ese nombre de usuario ya está en uso" });
 
+    var fotoUrl = null;
+    if (req.file) fotoUrl = await subirACloudinary(req.file.buffer, "uanl-explora/perfiles");
+
     const [result] = await db.query(
       "INSERT INTO usuarios (nombre, apellido, usuario, password, foto) VALUES (?, ?, ?, ?, ?)",
-      [nombre, apellido, usuario, password, foto || null]
+      [nombre, apellido, usuario, password, fotoUrl]
     );
-    res.json({ id: result.insertId, nombre, apellido, usuario, foto: foto || null });
+    res.json({ id: result.insertId, nombre, apellido, usuario, foto: fotoUrl });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
